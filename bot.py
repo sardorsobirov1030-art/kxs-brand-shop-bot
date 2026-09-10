@@ -728,3 +728,384 @@ async def admin_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 # ADMIN: PRODUCTS
 # ======
+async def admin_products_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    if not is_admin(q.from_user.id):
+        await q.message.reply_text("❌ Admin huquqi kerak.")
+        return
+
+    conn = db()
+    products = conn.execute(
+        "SELECT * FROM products ORDER BY id DESC"
+    ).fetchall()
+    conn.close()
+
+    if not products:
+        await q.message.reply_text("📦 Mahsulotlar yo'q.")
+        return
+
+    for p in products:
+        text = (
+            f"🆔 ID: {p['id']}\n"
+            f"🛍 {p['name']}\n"
+            f"💰 {money(p['price'])}"
+        )
+        if p["description"]:
+            text += f"\n📝 {p['description']}"
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "🗑 O'chirish",
+                        callback_data=f"delete_product:{p['id']}",
+                    )
+                ]
+            ]
+        )
+
+        await q.message.reply_text(text, reply_markup=keyboard)
+
+
+async def delete_product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    if not is_admin(q.from_user.id):
+        await q.message.reply_text("❌ Admin huquqi kerak.")
+        return
+
+    product_id = int(q.data.split(":")[1])
+
+    conn = db()
+    product = conn.execute(
+        "SELECT * FROM products WHERE id=?",
+        (product_id,),
+    ).fetchone()
+
+    if not product:
+        conn.close()
+        await q.message.reply_text("❌ Mahsulot topilmadi.")
+        return
+
+    conn.execute(
+        "DELETE FROM products WHERE id=?",
+        (product_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    await q.message.reply_text(
+        f"🗑 «{product['name']}» o'chirildi."
+    )
+
+
+# ============================================================
+# ADMIN: ORDERS
+# ============================================================
+
+async def admin_orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    if not is_admin(q.from_user.id):
+        await q.message.reply_text("❌ Admin huquqi kerak.")
+        return
+
+    conn = db()
+    orders = conn.execute(
+        """
+        SELECT o.*, p.name AS product_name, p.price AS product_price
+        FROM orders o
+        LEFT JOIN products p ON p.id=o.product_id
+        ORDER BY o.id DESC
+        LIMIT 30
+        """
+    ).fetchall()
+    conn.close()
+
+    if not orders:
+        await q.message.reply_text("🧾 Hali buyurtmalar yo'q.")
+        return
+
+    status_map = {
+        "new": "🆕 Yangi",
+        "confirmed": "✅ Tasdiqlangan",
+        "delivering": "🚚 Yetkazilmoqda",
+        "completed": "🏁 Yetkazildi",
+        "cancelled": "❌ Bekor qilingan",
+    }
+
+    for o in orders:
+        product_name = o["product_name"] or "O'chirilgan mahsulot"
+        text = (
+            f"📋 BUYURTMA №{o['id']}\n\n"
+            f"📦 Mahsulot: {product_name}\n"
+            f"💰 Narxi: {money(o['product_price'] or 0)}\n\n"
+            f"👤 Xaridor: {o['customer_name'] or '-'}\n"
+            f"📞 Telefon: {o['phone'] or '-'}\n"
+            f"🏙 Viloyat: {o['region'] or '-'}\n"
+            f"📍 Tuman/shahar: {o['district'] or '-'}\n"
+            f"🗺 Lokatsiya: {o['location'] or '-'}\n"
+            f"📊 Holat: {status_map.get(o['status'], o['status'])}"
+        )
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "✅ Tasdiqlash",
+                        callback_data=f"status:{o['id']}:confirmed",
+                    ),
+                    InlineKeyboardButton(
+                        "🚚 Yetkazish",
+                        callback_data=f"status:{o['id']}:delivering",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        "🏁 Yetkazildi",
+                        callback_data=f"status:{o['id']}:completed",
+                    ),
+                    InlineKeyboardButton(
+                        "❌ Bekor qilish",
+                        callback_data=f"status:{o['id']}:cancelled",
+                    ),
+                ],
+            ]
+        )
+
+        await q.message.reply_text(text, reply_markup=keyboard)
+
+
+async def order_status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    if not is_admin(q.from_user.id):
+        await q.message.reply_text("❌ Admin huquqi kerak.")
+        return
+
+    _, order_id, new_status = q.data.split(":")
+
+    conn = db()
+    order = conn.execute(
+        "SELECT user_id FROM orders WHERE id=?",
+        (int(order_id),),
+    ).fetchone()
+
+    if not order:
+        conn.close()
+        await q.message.reply_text("❌ Buyurtma topilmadi.")
+        return
+
+    conn.execute(
+        "UPDATE orders SET status=? WHERE id=?",
+        (new_status, int(order_id)),
+    )
+    conn.commit()
+    conn.close()
+
+    status_map = {
+        "confirmed": "✅ Buyurtmangiz tasdiqlandi.",
+        "delivering": "🚚 Buyurtmangiz yetkazib berishga chiqarildi.",
+        "completed": "🏁 Buyurtmangiz yetkazib berildi. Rahmat!",
+        "cancelled": "❌ Buyurtmangiz bekor qilindi.",
+    }
+
+    try:
+        await context.bot.send_message(
+            chat_id=order["user_id"],
+            text=(
+                f"📋 Buyurtma №{order_id}\n\n"
+                f"{status_map.get(new_status, '📊 Buyurtma holati o‘zgardi.')}"
+            ),
+        )
+    except Exception:
+        log.exception("Mijozga status yuborishda xato")
+
+    await q.message.reply_text(
+        f"✅ Buyurtma №{order_id} holati o'zgartirildi."
+    )
+
+
+# ============================================================
+# BUTTON ROUTER
+# ============================================================
+
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+
+    if q.data == "catalog":
+        await catalog_callback(update, context)
+        return
+
+    if q.data == "my_orders":
+        await my_orders_callback(update, context)
+        return
+
+    if q.data == "help":
+        await q.answer()
+        await q.message.reply_text(
+            "ℹ️ Yordam\n\n"
+            "🛍 Mahsulotni tanlang → 🛒 Buyurtma berish tugmasini bosing.\n"
+            "Keyin ism, telefon, viloyat, tuman/shahar va lokatsiyangizni yuborasiz.\n\n"
+            "Savollar bo'lsa, administrator bilan bog'laning."
+        )
+        return
+
+    if q.data == "admin_products":
+        await admin_products_callback(update, context)
+        return
+
+    if q.data == "admin_orders":
+        await admin_orders_callback(update, context)
+        return
+
+    if q.data.startswith("delete_product:"):
+        await delete_product_callback(update, context)
+        return
+
+    if q.data.startswith("status:"):
+        await order_status_callback(update, context)
+        return
+
+    await q.answer()
+
+
+# ============================================================
+# TEXT FALLBACK
+# ============================================================
+
+async def text_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (update.message.text or "").strip()
+
+    if text.lower() in {"mahsulotlar", "mahsulot", "katalog"}:
+        await show_catalog_message(update.message)
+        return
+
+    if text.lower() in {"admin", "admin panel"}:
+        await admin(update, context)
+        return
+
+    await update.message.reply_text(
+        "Kerakli bo'limni tanlang:",
+        reply_markup=main_menu(),
+    )
+
+
+# ============================================================
+# RENDER HEALTH SERVER
+# ============================================================
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"KXS BRAND SHOP BOT OK")
+
+    def log_message(self, format, *args):
+        return
+
+
+def run_web_server():
+    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+    log.info("Health server started on port %s", PORT)
+    server.serve_forever()
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+    init_db()
+
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    # Customer order conversation
+    order_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(order_start, pattern=r"^order:\d+$")
+        ],
+        states={
+            ORDER_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, order_name)
+            ],
+            ORDER_PHONE: [
+                MessageHandler(
+                    filters.CONTACT | (filters.TEXT & ~filters.COMMAND),
+                    order_phone,
+                )
+            ],
+            ORDER_REGION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, order_region)
+            ],
+            ORDER_DISTRICT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, order_district)
+            ],
+            ORDER_LOCATION: [
+                MessageHandler(filters.LOCATION, order_location)
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", order_cancel)
+        ],
+        allow_reentry=True,
+    )
+
+    # Admin add-product conversation
+    add_product_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(admin_add_start, pattern=r"^admin_add$")
+        ],
+        states={
+            ADD_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_name)
+            ],
+            ADD_PRICE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_price)
+            ],
+            ADD_DESCRIPTION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_description)
+            ],
+            ADD_PHOTO: [
+                MessageHandler(filters.PHOTO, add_photo)
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", admin_cancel)
+        ],
+        allow_reentry=True,
+    )
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
+
+    # Conversations first
+    app.add_handler(order_conv)
+    app.add_handler(add_product_conv)
+
+    # Other callback buttons
+    app.add_handler(CallbackQueryHandler(buttons))
+
+    # Normal text
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, text_fallback)
+    )
+
+    log.info("KXS BRAND SHOP BOT STARTED")
+
+    threading.Thread(
+        target=run_web_server,
+        daemon=True,
+    ).start()
+
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
