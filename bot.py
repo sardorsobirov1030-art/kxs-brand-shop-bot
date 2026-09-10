@@ -202,20 +202,19 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
         admin_id = get_setting("admin_id")
-
-if admin_id:
-    await q.get_bot().send_message(
-        chat_id=int(admin_id),
-        text=(
-            f"🔔 YANGI BUYURTMA!\n\n"
-            f"📦 Mahsulot: {p['name']}\n"
-            f"💰 Narxi: {money(p['price'])}\n"
-            f"👤 Xaridor: @{q.from_user.username or 'username yo‘q'}\n"
-            f"🆔 User ID: {user_id}\n"
-            f"📋 Buyurtma №{order_id}"
+        if admin_id:
+            await q.get_bot().send_message(
+                chat_id=int(admin_id),
+                text=(
+                    f"🔔 YANGI BUYURTMA!\n\n"
+                    f"📦 Mahsulot: {p['name']}\n"
+                    f"💰 Narxi: {money(p['price'])}\n"
+                    f"👤 Xaridor: @{q.from_user.username or 'username yo‘q'}\n"
+                    f"🆔 User ID: {user_id}\n"
+                    f"📋 Buyurtma №{order_id}"
+                )
         )
-    )
-
+ 
         await q.message.reply_text(
             f"✅ Buyurtmangiz qabul qilindi!\n\n"
             f"🛍 {p['name']}\n"
