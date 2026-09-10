@@ -5,7 +5,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ConversationHandler, ContextTypes, filters
@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-ADD_NAME, ADD_PRICE, ADD_DESCRIPTION, ADD_PHOTO = range(4)
+ADD_NAME, ADD_PRICE, ADD_DESCRIPTION, ADD_PHOTO, ORDER_NAME, ORDER_PHONE, ORDER_REGION, ORDER_DISTRICT, ORDER_LOCATION = range(9)
 
 
 def db():
@@ -47,13 +47,18 @@ def init_db():
     );
 
     CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        username TEXT,
-        product_id INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'new',
-        created_at TEXT NOT NULL
-    );
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT,
+    product_id INTEGER NOT NULL,
+    customer_name TEXT,
+    phone TEXT,
+    region TEXT,
+    district TEXT,
+    location TEXT,
+    status TEXT NOT NULL DEFAULT 'new',
+    created_at TEXT NOT NULL
+);
     """)
     conn.commit()
     conn.close()
@@ -266,7 +271,108 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    product_id = int(q.data.split(":")[1])
+
+    conn = db()
+    p = conn.execute(
+        "SELECT * FROM products WHERE id=?",
+        (product_id,)
+    ).fetchone()
+    conn.close()
+
+    if not p:
+        await q.message.reply_text("❌ Mahsulot topilmadi.")
+        return ConversationHandler.END
+
+    context.user_data["order"] = {
+        "product_id": product_id,
+        "product_name": p["name"],
+        "price": p["price"],
+    }
+
+    await q.message.reply_text(
+        "👤 Buyurtma uchun ismingizni kiriting:"
+    )
+
+    return ORDER_NAME
+
+
+async def order_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["order"]["customer_name"] = update.message.text.strip()
+
+    await update.message.reply_text(
+        "📞 Telefon raqamingizni yuboring:",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("📱 Telefon raqamni yuborish", request_contact=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+    )
+
+    return ORDER_PHONE
+
+
+async def order_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.contact:
+        phone = update.message.contact.phone_number
+    else:
+        phone = update.message.text.strip()
+
+    context.user_data["order"]["phone"] = phone
+
+    await update.message.reply_text(
+        "🏙 Qaysi viloyatga yetkazib beramiz?",
+        reply_markup=ReplyKeyboardMarkup(
+            [
+                ["Toshkent shahri", "Toshkent viloyati"],
+                ["Andijon", "Farg‘ona"],
+                ["Namangan", "Sirdaryo"],
+                ["Jizzax", "Samarqand"],
+                ["Qashqadaryo", "Surxondaryo"],
+                ["Buxoro", "Navoiy"],
+                ["Xorazm", "Qoraqalpog‘iston"]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+    )
+
+    async def order_district(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["order"]["district"] = update.message.text.strip()
+
+    await update.message.reply_text(
+        "📌 Endi yetkazib berish lokatsiyangizni yuboring:",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("📍 Lokatsiyani yuborish", request_location=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+    )
+    
+
+    async def order_district(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["order"]["district"] = update.message.text.strip()
+
+    await update.message.reply_text(
+        "📌 Endi yetkazib berish lokatsiyangizni yuboring:",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("📍 Lokatsiyani yuborish", request_location=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+    )
+
+    return ORDER_LOCATION
+
+
+
+
+    
+    async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return ConversationHandler.END
     context.user_data["adding"]["name"] = update.message.text.strip()
