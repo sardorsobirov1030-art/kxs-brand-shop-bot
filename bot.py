@@ -352,21 +352,12 @@ async def order_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
             one_time_keyboard=True,
         )
     )
-    
-
-    async def order_district(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["order"]["district"] = update.message.text.strip()
-
-    await update.message.reply_text(
-        "📌 Endi yetkazib berish lokatsiyangizni yuboring:",
-        reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("📍 Lokatsiyani yuborish", request_location=True)]],
-            resize_keyboard=True,
-            one_time_keyboard=True,
-        )
-    )
 
     return ORDER_LOCATION
+    
+    
+
+    
 
 
 
